@@ -341,12 +341,15 @@ def display_odds(race: dict, odds_list: list[dict], sort_by_odds: bool = False) 
         else:
             style, mark = "dim", "  ×"
 
+        def markup(val: str) -> str:
+            return f"[{style}]{val}[/{style}]" if style else val
+
         t.add_row(
-            f"[{style}]{h['horse_no']:2d}[/{style}]",
-            f"[{style}]{h['horse_name']}[/{style}]",
-            f"[{style}]{odds:6.1f}[/{style}]" if odds > 0 else "    -",
-            f"[{style}]{prob:5.1f}%[/{style}]" if prob > 0 else "     -",
-            f"[{style}]{mark}[/{style}]",
+            markup(f"{h['horse_no']:2d}"),
+            markup(h["horse_name"]),
+            markup(f"{odds:6.1f}") if odds > 0 else "    -",
+            markup(f"{prob:5.1f}%") if prob > 0 else "     -",
+            markup(mark),
         )
     console.print(t)
 
