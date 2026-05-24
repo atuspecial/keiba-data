@@ -280,6 +280,7 @@ def get_win_odds(race_id: str) -> list[dict]:
         console.print(f"[red]オッズ取得失敗 ({race_id}): {e}[/red]")
         return []
 
+    race_status = data.get("status", "unknown")  # "middle" / "result" / "before" etc.
     odds_dict = (data.get("data", {}).get("odds", {}).get("1", {}))
     results = []
     for horse_no_str, values in odds_dict.items():
@@ -296,6 +297,7 @@ def get_win_odds(race_id: str) -> list[dict]:
                 "win_odds": odds,
                 "implied_prob": round(100.0 / odds, 1) if odds > 0 else 0.0,
                 "fetched_at_jst": fetched_at,
+                "race_status": race_status,
             })
         except (ValueError, IndexError):
             continue
@@ -476,7 +478,8 @@ def save_csv_auto(venues_data: list[dict], date_str: str, timestamp: str) -> Pat
 
     fieldnames = [
         "date", "venue", "race_no", "race_name", "detail",
-        "horse_no", "horse_name", "win_odds", "implied_prob", "fetched_at_jst",
+        "horse_no", "horse_name", "win_odds", "implied_prob",
+        "fetched_at_jst", "race_status",
     ]
     with open(out_path, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -498,6 +501,7 @@ def save_csv_auto(venues_data: list[dict], date_str: str, timestamp: str) -> Pat
                         "win_odds": h["win_odds"],
                         "implied_prob": h["implied_prob"],
                         "fetched_at_jst": h.get("fetched_at_jst", ""),
+                        "race_status": h.get("race_status", ""),
                     })
     return out_path
 
