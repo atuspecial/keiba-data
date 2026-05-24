@@ -246,44 +246,53 @@ def select_races(race_details: list[dict]) -> list[dict]:
 # ── Step 4: オッズ取得・表示 ──────────────────────────────
 
 def get_win_odds(race_id: str) -> list[dict]:
-    """単勝オッズを取得する。各レコードに fetched_at_jst を付加する。"""
-    url = (f"https://race.netkeiba.com/odds/index.html"
-           f"?race_id={race_id}&type=b1")
+    """単勝オッズを取得する。各レコードに fetched_at_jst を付加する。
+    JSON APIから取得し、馬名はshutuba.htmlから補完する。
+    """
     fetched_at = now_jst()
+
+    # ── 馬名を shutuba.html から取得 ──────────────────────────
+    horse_names: dict[int, str] = {}
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
-        resp.encoding = resp.apparent_encoding
-        soup = BeautifulSoup(resp.text, "lxml")
+        shutuba_url = f"https://race.netkeiba.com/race/shutuba.html?race_id={race_id}"
+        resp = requests.get(shutuba_url, headers=HEADERS, timeout=15)
+        raw = resp.content.decode("euc-jp", errors="replace")
+        soup = BeautifulSoup(raw, "lxml")
+        for tr in soup.select("tr.HorseList"):
+            umaban_td = tr.select_one("td[class*='Umaban']")
+            name_tag = tr.select_one("span.HorseName a")
+            if umaban_td and name_tag:
+                try:
+                    no = int(re.sub(r"\D", "", umaban_td.get_text(strip=True)))
+                    horse_names[no] = name_tag.get_text(strip=True)
+                except ValueError:
+                    pass
+    except Exception as e:
+        console.print(f"[yellow]馬名取得失敗 ({race_id}): {e}[/yellow]")
+
+    # ── 単勝オッズを JSON API から取得 ───────────────────────
+    api_url = (f"https://race.netkeiba.com/api/api_get_jra_odds.html"
+               f"?race_id={race_id}&type=1&action=update")
+    try:
+        resp = requests.get(api_url, headers=HEADERS, timeout=15)
+        data = resp.json()
     except Exception as e:
         console.print(f"[red]オッズ取得失敗 ({race_id}): {e}[/red]")
         return []
 
+    odds_dict = (data.get("data", {}).get("odds", {}).get("1", {}))
     results = []
-    # 複数のセレクタパターンを試みる
-    rows = (soup.select("table#odds_tan_block tr")
-            or soup.select("tr.Odds_Table_Tr")
-            or soup.select("div#odds_tan_block tr"))
-
-    for tr in rows:
-        tds = tr.select("td")
-        # 現在のHTMLは6列: 枠 | 馬番 | 印 | 選択 | 馬名 | オッズ
-        if len(tds) < 6:
-            continue
+    for horse_no_str, values in odds_dict.items():
         try:
-            no_text = re.sub(r"\D", "", tds[1].get_text(strip=True))
-            if not no_text:
-                continue
-            horse_no = int(no_text)
-            horse_name = tds[4].get_text(strip=True)
-            raw_odds = tds[5].get_text(strip=True).replace(",", "")
-            # "---.-" や "---" はオッズ未確定（発売前・レース終了後）
-            if re.fullmatch(r"[-]+\.?[-]*", raw_odds) or not raw_odds:
+            horse_no = int(horse_no_str)
+            raw_odds = values[0] if values else ""
+            if not raw_odds or re.fullmatch(r"[-]+\.?[-]*", raw_odds):
                 odds = 0.0
             else:
                 odds = float(raw_odds)
             results.append({
                 "horse_no": horse_no,
-                "horse_name": horse_name,
+                "horse_name": horse_names.get(horse_no, f"馬{horse_no}"),
                 "win_odds": odds,
                 "implied_prob": round(100.0 / odds, 1) if odds > 0 else 0.0,
                 "fetched_at_jst": fetched_at,
