@@ -56,5 +56,6 @@ jobs:
           else
             TIMESTAMP=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST')
             git commit -m "chore: レース結果取得 ${TIMESTAMP}"
+            git pull --rebase
             git push
           fi
