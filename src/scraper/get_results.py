@@ -34,27 +34,33 @@ HEADERS = {
 }
 
 
-def get_venues(date_str: str) -> list[dict]:
-    """開催場所とレースIDリストを取得する（get_odds.py と同様）"""
+def _get_group_id(date_str: str) -> str:
     url = "https://race.netkeiba.com/top/race_list_get_date_list.html"
     try:
         resp = requests.get(url, headers=HEADERS, params={"kaisai_date": date_str}, timeout=15)
         resp.encoding = resp.apparent_encoding
         soup = BeautifulSoup(resp.text, "lxml")
-        tag = soup.find("li", {"date": date_str})
-        group_id = tag["group"] if tag else None
+        li = soup.find("li", {"date": date_str})
+        if li:
+            return li.get("group", "")
+        li_any = soup.find("li", attrs={"group": True})
+        return li_any.get("group", "") if li_any else ""
     except Exception:
-        group_id = None
+        return ""
 
+
+def get_venues(date_str: str) -> list[dict]:
+    """開催場所とレースIDリストを取得する（get_odds.py と同様）"""
+    group_id = _get_group_id(date_str)
     if group_id:
-        url2 = "https://race.netkeiba.com/top/race_list_sub.html"
-        params = {"kaisai_date": date_str, "current_group": group_id}
+        url = "https://race.netkeiba.com/top/race_list_sub.html"
+        params: dict = {"kaisai_date": date_str, "current_group": group_id}
     else:
-        url2 = f"https://race.netkeiba.com/top/race_list.html?kaisai_date={date_str}"
+        url = f"https://race.netkeiba.com/top/race_list.html?kaisai_date={date_str}"
         params = {}
 
     try:
-        resp = requests.get(url2, headers=HEADERS, params=params, timeout=15)
+        resp = requests.get(url, headers=HEADERS, params=params, timeout=15)
         resp.encoding = resp.apparent_encoding
         soup = BeautifulSoup(resp.text, "lxml")
     except Exception as e:
@@ -62,19 +68,32 @@ def get_venues(date_str: str) -> list[dict]:
         return []
 
     venues = []
-    for venue_block in soup.select("div.RaceList_Box"):
-        name_tag = venue_block.select_one(".RaceList_DataItem.RaceList_DataItem--Venue a, .RaceList_ItemTitle a")
-        if not name_tag:
+    for block in soup.select("dl.RaceList_DataList"):
+        venue_tag = block.select_one("dt")
+        race_links = block.select("dd a")
+        if not venue_tag or not race_links:
             continue
-        venue_name = name_tag.get_text(strip=True)
-        race_links = venue_block.select("a[href*='race_id=']")
+        title_tag = venue_tag.select_one("p.RaceList_DataTitle")
+        if title_tag:
+            venue_name = "".join(
+                t for t in title_tag.find_all(string=True, recursive=False)
+            ).strip()
+            if not venue_name:
+                venue_name = title_tag.get_text(strip=True)
+        else:
+            venue_name = venue_tag.get_text(strip=True)
+        seen_ids: set[str] = set()
         race_ids = []
         for a in race_links:
             m = re.search(r"race_id=(\d+)", a.get("href", ""))
-            if m:
-                race_ids.append(m.group(1))
+            if not m:
+                continue
+            race_id = m.group(1)
+            if race_id not in seen_ids:
+                seen_ids.add(race_id)
+                race_ids.append(race_id)
         if race_ids:
-            venues.append({"name": venue_name, "race_ids": list(dict.fromkeys(race_ids))})
+            venues.append({"name": venue_name, "race_ids": race_ids})
     return venues
 
 
