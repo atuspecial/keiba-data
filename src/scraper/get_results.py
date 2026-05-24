@@ -125,33 +125,34 @@ def scrape_result(race_id: str) -> list[dict]:
     results = []
     for tr in rows:
         try:
-            pos_tag = tr.select_one("div.Rank")
-            if not pos_tag:
+            # 着順: td.Result_Num
+            pos_td = tr.select_one("td.Result_Num")
+            if not pos_td:
                 continue
-            pos_text = re.sub(r"\D", "", pos_tag.get_text(strip=True))
+            pos_text = re.sub(r"\D", "", pos_td.get_text(strip=True))
             if not pos_text:
                 continue
             finish_pos = int(pos_text)
 
-            # 馬番
-            umaban_td = tr.select_one("td.Num.Txt_C div, td.Num div")
+            # 馬番: td.Num.Txt_C（枠番は td.Num.WakuX）
+            umaban_td = tr.select_one("td.Num.Txt_C")
             horse_no = int(re.sub(r"\D", "", umaban_td.get_text(strip=True))) if umaban_td else 0
 
-            # 馬名
-            name_tag = tr.select_one("span.HorseNameSpan, span.Horse_Name")
-            horse_name = name_tag.get_text(strip=True) if name_tag else ""
+            # 馬名: td.Horse_Info の直接テキスト
+            name_td = tr.select_one("td.Horse_Info")
+            horse_name = name_td.get_text(strip=True) if name_td else ""
 
-            # タイム
-            time_tags = tr.select("span.RaceTime")
-            finish_time = time_tags[0].get_text(strip=True) if time_tags else ""
+            # タイム: 最初の td.Time
+            time_tds = tr.select("td.Time")
+            finish_time = time_tds[0].get_text(strip=True) if time_tds else ""
 
-            # 人気
-            popularity_tag = tr.select_one("span.OddsPeople")
-            popularity = int(re.sub(r"\D", "", popularity_tag.get_text(strip=True))) if popularity_tag else 0
+            # 人気: td.Odds.Txt_C（BgYellow付きもあり）
+            popularity_td = tr.select_one("td.Odds.Txt_C")
+            popularity = int(re.sub(r"\D", "", popularity_td.get_text(strip=True))) if popularity_td else 0
 
-            # 最終単勝オッズ
-            odds_tag = tr.select_one("span.Odds_Ninki")
-            raw_odds = odds_tag.get_text(strip=True).replace(",", "") if odds_tag else ""
+            # 最終単勝オッズ: td.Odds.Txt_R
+            odds_td = tr.select_one("td.Odds.Txt_R")
+            raw_odds = odds_td.get_text(strip=True).replace(",", "") if odds_td else ""
             final_odds = float(raw_odds) if raw_odds and re.match(r"[\d.]+", raw_odds) else 0.0
 
             results.append({
