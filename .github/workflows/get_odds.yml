@@ -2,9 +2,9 @@ name: Get Odds
 
 on:
   schedule:
-    # 土日 09:00〜17:50 JST (= UTC 00:00〜08:50) に10分間隔
-    # JST = UTC+9 なので UTC 0:00 = JST 9:00
-    - cron: '0,10,20,30,40,50 0-8 * * 6,0'
+    # 土日 JST 9:00〜17:00 (UTC 0:00〜8:00) に毎時起動
+    # ジョブ内で10分×6回ループして1時間分のデータを収集する
+    - cron: '0 0-8 * * 6,0'
   workflow_dispatch:
     inputs:
       date:
@@ -12,9 +12,16 @@ on:
         required: false
         default: ''
 
+# 同一グループで1ジョブのみ実行。新規ジョブはキューに入る（キャンセルしない）
+concurrency:
+  group: get-odds
+  cancel-in-progress: false
+
 jobs:
   get-odds:
+    name: オッズ取得ループ
     runs-on: ubuntu-latest
+    timeout-minutes: 70   # 6回×10分 + セットアップ余裕
     permissions:
       contents: write
 
@@ -31,34 +38,51 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        run: |
-          pip install requests beautifulsoup4 lxml rich PyYAML
+        run: pip install requests beautifulsoup4 lxml rich PyYAML
 
-      - name: Run get_odds (auto mode)
-        run: |
-          DATE_ARG="${{ github.event.inputs.date }}"
-          if [ -n "$DATE_ARG" ]; then
-            python src/scraper/get_odds.py --auto --date "$DATE_ARG"
-          else
-            python src/scraper/get_odds.py --auto
-          fi
-
-      - name: Commit and push CSV
+      - name: Configure git
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # 新しいCSVがあれば追加（存在しない場合はスキップ）
-          if ls data/raw/odds_*.csv 1>/dev/null 2>&1; then
-            git add data/raw/odds_*.csv
+      - name: Run odds collection loop
+        run: |
+          DATE_ARG="${{ github.event.inputs.date }}"
+
+          # スケジュール実行: 6回ループ（10分×6 = 1時間分）
+          # 手動実行 (workflow_dispatch): 1回のみ
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            ITERATIONS=6
+          else
+            ITERATIONS=1
           fi
 
-          # 差分がある場合のみコミット
-          if git diff --cached --quiet; then
-            echo "新しいデータなし（開催なし or オッズ未確定）。スキップ。"
-          else
-            TIMESTAMP=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST')
-            git commit -m "chore: オッズ取得 ${TIMESTAMP}"
-            git pull --rebase
-            git push
-          fi
+          for i in $(seq 1 $ITERATIONS); do
+            echo "====== $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST') [${i}/${ITERATIONS}] ======"
+
+            if [ -n "$DATE_ARG" ]; then
+              python src/scraper/get_odds.py --auto --date "$DATE_ARG" || true
+            else
+              python src/scraper/get_odds.py --auto || true
+            fi
+
+            # 新しいCSVがあれば追加
+            if ls data/raw/odds_*.csv 1>/dev/null 2>&1; then
+              git add data/raw/odds_*.csv
+            fi
+
+            # 差分があればコミット&プッシュ
+            if git diff --cached --quiet; then
+              echo "新しいデータなし（開催なし or オッズ未確定）。スキップ。"
+            else
+              TIMESTAMP=$(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M JST')
+              git commit -m "chore: オッズ取得 ${TIMESTAMP}"
+              git pull --rebase && git push
+            fi
+
+            # 最終ループは待機しない
+            if [ $i -lt $ITERATIONS ]; then
+              echo "10分待機中..."
+              sleep 600
+            fi
+          done
